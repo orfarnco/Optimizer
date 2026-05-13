@@ -1,0 +1,70 @@
+{
+  "strategies": {
+    "MotherFucker MQL": {
+      "symbol": "NQ1!",
+      "timeframe": "1",
+      "updated_at": "2026-05-09T20:09:31",
+      "parameters": [
+        "MIN ATR",
+        "BAR SIZE MIN",
+        "MIN DIS",
+        "First entry lookback",
+        "Second entry lookback",
+        "First Session close",
+        "Second Session close",
+        "Tick move",
+        "Contracts",
+        "TP:",
+        "SL:"
+      ]
+    },
+    "NQ Stop Orders System": {
+      "symbol": "NQ1!",
+      "timeframe": "1",
+      "updated_at": "2026-05-09T23:45:14",
+      "parameters": [
+        "Signal Type",
+        "Strong Body Minimum Body % Of Candle",
+        "Hammer Wick / Body Minimum Ratio",
+        "Compression Length",
+        "Compression Range Ratio Vs Avg Range",
+        "NR Length",
+        "Liquidity Sweep Lookback",
+        "Trend Pullback EMA Length",
+        "ATR Minimum Relative To Close",
+        "Volatility Ratio Minimum",
+        "Bar Size Minimum Relative To Close",
+        "SuperTrend Distance Minimum Relative To Close",
+        "Range Candles Number",
+        "Stop Entry Offset",
+        "Stop Loss",
+        "Take Profit",
+        "Use ATR Filter",
+        "Use Volatility Ratio Filter",
+        "Use Bar Size Filter",
+        "Use SuperTrend Distance Filter",
+        "Use Range High Low",
+        "Use Entry Offset"
+      ],
+      "parameter_options": {
+        "Signal Type": [
+          "Basic Candle",
+          "Engulfing",
+          "Inside Bar",
+          "Outside Bar",
+          "FVG",
+          "Hammer / Shooting Star",
+          "Strong Body Candle",
+          "Small Range Compression",
+          "Breakout After Compression",
+          "Two Candle Reversal",
+          "Three Bar Pattern",
+          "Liquidity Sweep",
+          "NR7",
+          "Trend Continuation Pullback",
+          "Failed Breakout / Breakdown"
+        ]
+      }
+    }
+  }
+}

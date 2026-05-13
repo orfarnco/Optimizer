@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+
+tv_chrome_profile/
+*.log
+*.err.log
+optimizer_progress.json
+optimizer_stop.flag
+
+Optimization_Report*.pdf
+.streamlit/secrets.toml
+.streamlit/credentials.toml
