@@ -439,6 +439,65 @@ def main():
             except Exception as e:
                 print(f"Could not remove indicators dialog overlay: {e}")
 
+        def wait_for_strategy_legend(page, expected_legend_text, timeout=8000):
+            visible_row = page.locator("div[data-qa-id='legend-source-item']:visible").filter(
+                has_text=expected_legend_text
+            ).first
+            attached_row = page.locator("div[data-qa-id='legend-source-item']").filter(
+                has_text=expected_legend_text
+            ).first
+
+            try:
+                visible_row.wait_for(state="visible", timeout=timeout)
+                print("Strategy legend row is visible")
+                return True
+            except Exception:
+                try:
+                    attached_row.wait_for(state="attached", timeout=1500)
+                    print("Strategy legend row is attached but not visible; continuing")
+                    return True
+                except Exception:
+                    return False
+
+        def add_strategy_from_indicators_dialog(page, expected_legend_text):
+            result = page.locator("[data-role='list-item']").filter(
+                has_text=expected_legend_text
+            ).first
+            if result.count() == 0:
+                result = page.locator("[data-role='list-item']").first
+
+            result.wait_for(state="visible", timeout=10000)
+
+            try:
+                result_texts = page.locator("[data-role='list-item']").evaluate_all(
+                    "(els) => els.slice(0, 5).map((el) => el.innerText)"
+                )
+                print(f"Indicator search results: {result_texts}")
+            except Exception as e:
+                print(f"Could not read indicator search results: {e}")
+
+            attempts = [
+                ("forced click", lambda: result.click(force=True, timeout=5000)),
+                ("double click", lambda: result.dblclick(force=True, timeout=5000)),
+                ("JavaScript click", lambda: result.evaluate("el => el.click()")),
+                ("Enter", lambda: result.press("Enter", timeout=5000)),
+            ]
+
+            for label, action in attempts:
+                try:
+                    action()
+                    page.wait_for_timeout(1500)
+                    if wait_for_strategy_legend(page, expected_legend_text, timeout=3000):
+                        print(f"Added strategy with {label}")
+                        return
+                    print(f"Strategy legend not found after {label}; retrying")
+                except Exception as e:
+                    print(f"Could not add strategy with {label}: {e}")
+
+            raise Exception(
+                f"Could not add strategy '{expected_legend_text}' from indicators dialog"
+            )
+
         clear_indicators_via_context_menu(page)
         page.wait_for_timeout(1000)
 
@@ -478,20 +537,10 @@ def main():
         search_input.fill(bot_name)
         page.wait_for_timeout(2000)
 
-        first_script = page.locator("[data-role='list-item']").first
-        first_script.wait_for(state="visible")
-        first_script.click(force=True)
-        page.wait_for_timeout(1000)
+        add_strategy_from_indicators_dialog(page, bot_name)
         dismiss_indicators_dialog(page, bot_name)
-        try:
-            page.locator("div[data-qa-id='legend-source-item']:visible").filter(
-                has_text=bot_name
-            ).first.wait_for(state="visible", timeout=5000)
-        except Exception:
-            page.locator("div[data-qa-id='legend-source-item']").filter(
-                has_text=bot_name
-            ).first.wait_for(state="attached", timeout=5000)
-            print("Strategy legend row is attached but not visible; continuing")
+        if not wait_for_strategy_legend(page, bot_name, timeout=8000):
+            raise Exception(f"Strategy '{bot_name}' was not added to the chart legend")
         page.wait_for_timeout(1000)
 
         def set_timeframe(page, value: str):
