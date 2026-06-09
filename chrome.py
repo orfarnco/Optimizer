@@ -510,6 +510,75 @@ def main():
                 page.wait_for_timeout(300)
             return False
 
+        def indicator_results(page):
+            return page.locator(
+                "[data-role='list-item'], "
+                "[role='option'], "
+                "[role='listitem'], "
+                "[data-name='script-item'], "
+                "[data-script-id]"
+            )
+
+        def log_indicators_dialog_state(page, label):
+            try:
+                search_value = page.locator("#indicators-dialog-search-input:visible").input_value(
+                    timeout=1000
+                )
+            except Exception:
+                search_value = "<unavailable>"
+
+            try:
+                dialog_text = page.locator("[role='dialog']:visible").first.inner_text(timeout=2000)
+                dialog_text = re.sub(r"\s+", " ", dialog_text).strip()[:800]
+            except Exception:
+                dialog_text = "<dialog text unavailable>"
+
+            print(f"{label}: search value={search_value!r}; dialog text={dialog_text!r}")
+
+        def search_indicators_dialog(page, query):
+            search_box = page.locator("#indicators-dialog-search-input:visible").first
+            search_box.wait_for(state="visible", timeout=10000)
+
+            attempts = [
+                ("fill", lambda: search_box.fill(query)),
+                ("keyboard type", lambda: (
+                    search_box.click(force=True),
+                    page.keyboard.press("Control+A"),
+                    page.keyboard.press("Backspace"),
+                    page.keyboard.type(query, delay=40),
+                )),
+                ("JavaScript input", lambda: search_box.evaluate(
+                    """
+                    (el, value) => {
+                        el.focus();
+                        el.value = value;
+                        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    """,
+                    query,
+                )),
+            ]
+
+            for label, action in attempts:
+                try:
+                    action()
+                    page.wait_for_timeout(1500)
+                    results = indicator_results(page)
+                    if results.count() > 0:
+                        print(f"Indicator search produced {results.count()} result(s) after {label}")
+                        return
+                    page.keyboard.press("Enter")
+                    page.wait_for_timeout(1500)
+                    if results.count() > 0:
+                        print(f"Indicator search produced {results.count()} result(s) after {label} + Enter")
+                        return
+                    log_indicators_dialog_state(page, f"No indicator results after {label}")
+                except Exception as e:
+                    print(f"Could not search indicators with {label}: {e}")
+
+            raise Exception(f"Indicator search returned no results for '{query}'")
+
         def dismiss_tradingview_overlays(page):
             close_selectors = [
                 "button[data-qa-id='close']:visible",
@@ -560,10 +629,10 @@ def main():
                 if removed:
                     print(f"Removed {removed} TradingView overlay node(s)")
             except Exception as e:
-                print(f"Could not remove TradingView overlays: {e}")
+                        print(f"Could not remove TradingView overlays: {e}")
 
         def add_strategy_from_indicators_dialog(page, expected_legend_text):
-            results = page.locator("[data-role='list-item']")
+            results = indicator_results(page)
             results.first.wait_for(state="visible", timeout=10000)
             dismiss_tradingview_overlays(page)
 
@@ -658,12 +727,7 @@ def main():
 
         open_indicators_dialog(page)
 
-        search_input = page.locator("#indicators-dialog-search-input:visible")
-        search_input.wait_for(state="visible")
-        page.wait_for_timeout(2000)
-
-        search_input.fill(bot_name)
-        page.wait_for_timeout(2000)
+        search_indicators_dialog(page, bot_name)
 
         add_strategy_from_indicators_dialog(page, bot_name)
         dismiss_indicators_dialog(page, bot_name)
