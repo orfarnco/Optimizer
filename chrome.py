@@ -475,9 +475,62 @@ def main():
                 page.wait_for_timeout(300)
             return False
 
+        def dismiss_tradingview_overlays(page):
+            close_selectors = [
+                "button[data-qa-id='close']:visible",
+                "button[aria-label='Close']:visible",
+                "button[aria-label*='close' i]:visible",
+                "[data-name='close']:visible",
+            ]
+
+            for selector in close_selectors:
+                close_buttons = page.locator(selector)
+                for index in range(min(close_buttons.count(), 4)):
+                    button = close_buttons.nth(index)
+                    try:
+                        button.evaluate("el => el.click()")
+                        page.wait_for_timeout(300)
+                        print(f"Dismissed TradingView overlay with selector: {selector}")
+                        return
+                    except Exception:
+                        pass
+
+            try:
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
+            except Exception:
+                pass
+
+            try:
+                removed = page.evaluate(
+                    """
+                    () => {
+                        const patterns = [
+                            'Access over 100,000 trading indicators',
+                            'Access over 100,000',
+                        ];
+                        let removed = 0;
+                        for (const pattern of patterns) {
+                            for (const node of document.querySelectorAll('div[data-id], [data-focus-trap="true"]')) {
+                                if (node.innerText && node.innerText.includes(pattern)) {
+                                    node.remove();
+                                    removed += 1;
+                                }
+                            }
+                        }
+                        return removed;
+                    }
+                    """
+                )
+                if removed:
+                    print(f"Removed {removed} TradingView overlay node(s)")
+            except Exception as e:
+                print(f"Could not remove TradingView overlays: {e}")
+
         def add_strategy_from_indicators_dialog(page, expected_legend_text):
             results = page.locator("[data-role='list-item']")
             results.first.wait_for(state="visible", timeout=10000)
+            dismiss_tradingview_overlays(page)
 
             try:
                 result_texts = results.evaluate_all(
@@ -522,7 +575,7 @@ def main():
                 for label, action in attempts:
                     try:
                         print(f"Trying indicator {index + 1}: {result_text} with {label}")
-                        result.hover(timeout=3000)
+                        dismiss_tradingview_overlays(page)
                         action()
                         page.wait_for_timeout(1200)
                         if wait_for_new_legend_item(page, previous_count, timeout=3000):
