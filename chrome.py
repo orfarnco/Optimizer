@@ -401,6 +401,44 @@ def main():
 
             raise Exception(f"Could not open indicators dialog: {last_error}")
 
+        def dismiss_indicators_dialog(page, expected_legend_text):
+            legend_row = page.locator("div[data-qa-id='legend-source-item']").filter(
+                has_text=expected_legend_text
+            ).first
+            close_button = page.locator("button[data-qa-id='close']:visible").last
+
+            for label, action in [
+                ("Escape", lambda: page.keyboard.press("Escape")),
+                ("JavaScript close click", lambda: close_button.evaluate("el => el.click()")),
+                ("forced close click", lambda: close_button.click(force=True, timeout=3000)),
+                ("Enter on close button", lambda: close_button.press("Enter", timeout=3000)),
+            ]:
+                try:
+                    action()
+                    page.wait_for_timeout(600)
+                    if close_button.count() == 0 or not close_button.is_visible(timeout=500):
+                        print(f"Dismissed indicators dialog with {label}")
+                        return
+                    if legend_row.count() > 0:
+                        print(f"Strategy added; dialog still visible after {label}, continuing")
+                        return
+                except Exception as e:
+                    print(f"Could not dismiss indicators dialog with {label}: {e}")
+
+            try:
+                page.evaluate(
+                    """
+                    () => {
+                        document.querySelectorAll('[data-focus-trap="true"], .backdrop-f4TzBb9d')
+                            .forEach((el) => el.remove());
+                    }
+                    """
+                )
+                page.wait_for_timeout(500)
+                print("Removed blocked indicators dialog overlay")
+            except Exception as e:
+                print(f"Could not remove indicators dialog overlay: {e}")
+
         clear_indicators_via_context_menu(page)
         page.wait_for_timeout(1000)
 
@@ -442,8 +480,9 @@ def main():
 
         first_script = page.locator("[data-role='list-item']").first
         first_script.wait_for(state="visible")
-        first_script.click()
-        page.locator("button[data-qa-id='close']:visible").click()
+        first_script.click(force=True)
+        page.wait_for_timeout(1000)
+        dismiss_indicators_dialog(page, bot_name)
         try:
             page.locator("div[data-qa-id='legend-source-item']:visible").filter(
                 has_text=bot_name
