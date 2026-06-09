@@ -101,6 +101,16 @@ def load_parameter_catalog():
         return {}
 
 
+def read_log_tail(path, max_lines=40):
+    if not path.exists():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-max_lines:])
+
+
 def saved_strategy_parameters(strategy):
     catalog = load_parameter_catalog()
     strategy_data = catalog.get("strategies", {}).get(strategy, {})
@@ -260,7 +270,10 @@ Source: list=Close,Open,High,Low
         with scan_col_b:
             if scan_is_running:
                 progress = read_progress()
-                st.info(progress.get("message", "Scanning bot variables..."))
+                if progress.get("status") == "error":
+                    st.error(progress.get("message", "Variable scan failed."))
+                else:
+                    st.info(progress.get("message", "Scanning bot variables..."))
                 time.sleep(1)
                 st.rerun()
             elif scan_process is not None:
@@ -271,6 +284,10 @@ Source: list=Close,Open,High,Low
                     st.rerun()
                 else:
                     st.error("Variable scan failed. Check optimizer_output.log.")
+                    log_tail = read_log_tail(APP_DIR / "optimizer_output.log")
+                    if log_tail:
+                        with st.expander("Last log lines"):
+                            st.code(log_tail, language="text")
             elif saved_params:
                 updated_at = saved_strategy_updated_at(strategy)
                 suffix = f" Last scan: {updated_at}" if updated_at else ""
@@ -497,11 +514,15 @@ def run_parameter_scan(symbol, timeframe, strategy, backtest_range):
 
     try:
         log_handle = open(log_file, "w", encoding="utf-8")
+        child_env = os.environ.copy()
+        if any(key.startswith("RAILWAY_") for key in child_env):
+            child_env["PLAYWRIGHT_HEADLESS"] = "true"
         process = subprocess.Popen(
             cmd,
             cwd=APP_DIR,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
+            env=child_env,
             text=True,
         )
         st.session_state.scan_process = process

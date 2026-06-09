@@ -18,6 +18,13 @@ from reportlab.lib.styles import ParagraphStyle
 from bidi.algorithm import get_display
 
 TRADINGVIEW_URL = "https://www.tradingview.com/"
+RAILWAY_ENV_KEYS = (
+    "RAILWAY_PROJECT_ID",
+    "RAILWAY_SERVICE_ID",
+    "RAILWAY_ENVIRONMENT_ID",
+    "RAILWAY_DEPLOYMENT_ID",
+    "RAILWAY_REPLICA_ID",
+)
 pdfmetrics.registerFont(
     TTFont("DejaVuSans", "fonts/DejaVuSans.ttf")
 )
@@ -119,6 +126,17 @@ def write_progress(progress_file, **data):
     progress_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def env_flag(name, default=False):
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def running_on_railway():
+    return any(os.getenv(key) for key in RAILWAY_ENV_KEYS)
+
+
 def save_strategy_parameters(catalog_file, strategy, symbol, timeframe, parameter_names, parameter_options=None):
     catalog_path = Path(catalog_file)
     if catalog_path.exists():
@@ -197,27 +215,50 @@ def main():
     write_progress(args.progress_file, status="starting", current=0, total=0, message="Starting browser")
 
     with sync_playwright() as p:
-        # תיקיית פרופיל מקומית (cookies/session נשמרים פה)
-        user_data_dir = "tv_chrome_profile"
+        cloud_runtime = running_on_railway()
+        # Local runs keep the reusable login profile. Railway uses a writable
+        # ephemeral profile because there is no desktop session or local Chrome.
+        user_data_dir = os.getenv(
+            "PLAYWRIGHT_USER_DATA_DIR",
+            "/tmp/tv_chrome_profile" if cloud_runtime else "tv_chrome_profile",
+        )
+        headless = True if cloud_runtime else env_flag("PLAYWRIGHT_HEADLESS", default=False)
 
-        running_on_railway = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"))
-        headless = os.getenv("PLAYWRIGHT_HEADLESS", "true" if running_on_railway else "false").lower() in {
-            "1",
-            "true",
-            "yes",
-        }
         launch_options = {
             "user_data_dir": user_data_dir,
             "headless": headless,
             "viewport": None,
-            "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+            "args": [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ],
         }
 
         if not headless:
             launch_options["channel"] = "chrome"          # מנסה להשתמש בכרום המותקן
             launch_options["args"].append("--start-maximized")
 
-        context = p.chromium.launch_persistent_context(**launch_options)
+        print(
+            f"Launching Playwright Chromium "
+            f"(headless={headless}, railway={cloud_runtime}, user_data_dir={user_data_dir})",
+            flush=True,
+        )
+        try:
+            context = p.chromium.launch_persistent_context(**launch_options)
+        except Exception as exc:
+            write_progress(
+                args.progress_file,
+                status="error",
+                current=0,
+                total=0,
+                message=f"Playwright browser failed to start: {exc}",
+            )
+            print(f"Playwright browser failed to start: {exc}", flush=True)
+            raise
 
         page = context.new_page()
         page.set_viewport_size({"width": 1500, "height": 1080})
