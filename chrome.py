@@ -459,40 +459,80 @@ def main():
                 except Exception:
                     return False
 
-        def add_strategy_from_indicators_dialog(page, expected_legend_text):
-            result = page.locator("[data-role='list-item']").filter(
-                has_text=expected_legend_text
-            ).first
-            if result.count() == 0:
-                result = page.locator("[data-role='list-item']").first
+        def legend_item_count(page):
+            try:
+                return page.locator("div[data-qa-id='legend-source-item']").count()
+            except Exception:
+                return 0
 
-            result.wait_for(state="visible", timeout=10000)
+        def wait_for_new_legend_item(page, previous_count, timeout=8000):
+            deadline = time.monotonic() + (timeout / 1000)
+            while time.monotonic() < deadline:
+                current_count = legend_item_count(page)
+                if current_count > previous_count:
+                    print(f"Strategy legend count increased from {previous_count} to {current_count}")
+                    return True
+                page.wait_for_timeout(300)
+            return False
+
+        def add_strategy_from_indicators_dialog(page, expected_legend_text):
+            results = page.locator("[data-role='list-item']")
+            results.first.wait_for(state="visible", timeout=10000)
 
             try:
-                result_texts = page.locator("[data-role='list-item']").evaluate_all(
+                result_texts = results.evaluate_all(
                     "(els) => els.slice(0, 5).map((el) => el.innerText)"
                 )
                 print(f"Indicator search results: {result_texts}")
             except Exception as e:
                 print(f"Could not read indicator search results: {e}")
 
-            attempts = [
-                ("forced click", lambda: result.click(force=True, timeout=5000)),
-                ("double click", lambda: result.dblclick(force=True, timeout=5000)),
-                ("JavaScript click", lambda: result.evaluate("el => el.click()")),
-                ("Enter", lambda: result.press("Enter", timeout=5000)),
-            ]
+            candidate_count = min(results.count(), 6)
+            if candidate_count == 0:
+                raise Exception("Indicator search returned no list items")
 
-            for label, action in attempts:
+            for index in range(candidate_count):
+                result = results.nth(index)
                 try:
-                    action()
-                    page.wait_for_timeout(1500)
-                    if wait_for_strategy_legend(page, expected_legend_text, timeout=3000):
-                        print(f"Added strategy with {label}")
-                        return
-                    print(f"Strategy legend not found after {label}; retrying")
-                except Exception as e:
-                    print(f"Could not add strategy with {label}: {e}")
+                    result_text = result.inner_text(timeout=2000).replace("\n", " | ")
+                except Exception:
+                    result_text = f"result #{index + 1}"
+
+                previous_count = legend_item_count(page)
+                buttons = result.locator("button")
+
+                attempts = [
+                    ("row forced click", lambda item=result: item.click(force=True, timeout=5000)),
+                    ("row double click", lambda item=result: item.dblclick(force=True, timeout=5000)),
+                    ("row JavaScript click", lambda item=result: item.evaluate("el => el.click()")),
+                    ("row Enter", lambda item=result: item.press("Enter", timeout=5000)),
+                ]
+
+                for button_index in range(min(buttons.count(), 4)):
+                    button = buttons.nth(button_index)
+                    attempts.append((
+                        f"button {button_index + 1} click",
+                        lambda btn=button: btn.click(force=True, timeout=5000),
+                    ))
+                    attempts.append((
+                        f"button {button_index + 1} JavaScript click",
+                        lambda btn=button: btn.evaluate("el => el.click()"),
+                    ))
+
+                for label, action in attempts:
+                    try:
+                        print(f"Trying indicator {index + 1}: {result_text} with {label}")
+                        result.hover(timeout=3000)
+                        action()
+                        page.wait_for_timeout(1200)
+                        if wait_for_new_legend_item(page, previous_count, timeout=3000):
+                            print(f"Added strategy using indicator {index + 1} with {label}")
+                            return
+                        if wait_for_strategy_legend(page, expected_legend_text, timeout=1000):
+                            print(f"Added strategy with {label}")
+                            return
+                    except Exception as e:
+                        print(f"Could not add indicator {index + 1} with {label}: {e}")
 
             raise Exception(
                 f"Could not add strategy '{expected_legend_text}' from indicators dialog"
