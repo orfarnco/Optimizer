@@ -4,6 +4,7 @@ import json
 import os
 import time
 import re
+import tempfile
 from pathlib import Path
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib import colors
@@ -133,6 +134,16 @@ def env_flag(name, default=False):
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name, default=0):
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value.strip())
+    except ValueError:
+        return default
+
+
 def running_on_railway():
     return any(os.getenv(key) for key in RAILWAY_ENV_KEYS)
 
@@ -214,14 +225,18 @@ def main():
         stop_file.unlink()
     write_progress(args.progress_file, status="starting", current=0, total=0, message="Starting browser")
 
+    temp_profile = None
     with sync_playwright() as p:
         cloud_runtime = running_on_railway()
-        # Local runs keep the reusable login profile. Railway uses a writable
-        # ephemeral profile because there is no desktop session or local Chrome.
-        user_data_dir = os.getenv(
-            "PLAYWRIGHT_USER_DATA_DIR",
-            "/tmp/tv_chrome_profile" if cloud_runtime else "tv_chrome_profile",
-        )
+        remember_session = env_flag("TRADINGVIEW_REMEMBER_SESSION", default=False)
+        if remember_session:
+            user_data_dir = os.getenv(
+                "PLAYWRIGHT_USER_DATA_DIR",
+                "/tmp/tv_chrome_profile" if cloud_runtime else "tv_chrome_profile",
+            )
+        else:
+            temp_profile = tempfile.TemporaryDirectory(prefix="tv_chrome_profile_")
+            user_data_dir = temp_profile.name
         headless = True if cloud_runtime else env_flag("PLAYWRIGHT_HEADLESS", default=False)
 
         launch_options = {
@@ -244,7 +259,8 @@ def main():
 
         print(
             f"Launching Playwright Chromium "
-            f"(headless={headless}, railway={cloud_runtime}, user_data_dir={user_data_dir})",
+            f"(headless={headless}, railway={cloud_runtime}, "
+            f"remember_session={remember_session}, user_data_dir={user_data_dir})",
             flush=True,
         )
         try:
@@ -266,8 +282,27 @@ def main():
         # לחכות שהעמוד נטען
         page.wait_for_load_state("domcontentloaded")
 
-        # ללחוץ על כפתור פתיחת תפריט משתמש
-        # page.get_by_role("button", name="Open user menu").nth(0).click()
+        login_wait_seconds = env_int("TRADINGVIEW_LOGIN_WAIT_SECONDS", default=30)
+        if login_wait_seconds > 0:
+            if headless:
+                print(
+                    f"Skipping {login_wait_seconds}s TradingView login wait because browser is headless",
+                    flush=True,
+                )
+            else:
+                write_progress(
+                    args.progress_file,
+                    status="login_wait",
+                    current=0,
+                    total=0,
+                    message=f"Waiting {login_wait_seconds} seconds for TradingView login",
+                )
+                print(
+                    f"Waiting {login_wait_seconds} seconds for TradingView login. "
+                    "Use the opened browser to sign in now.",
+                    flush=True,
+                )
+                page.wait_for_timeout(login_wait_seconds * 1000)
 
         # לחכות שה-dropdown יופיע
         page.wait_for_timeout(1000)
