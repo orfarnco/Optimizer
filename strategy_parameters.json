@@ -21,7 +21,7 @@
     "NQ Stop Orders System": {
       "symbol": "NQ1!",
       "timeframe": "1",
-      "updated_at": "2026-05-09T23:45:14",
+      "updated_at": "2026-05-20T13:54:49",
       "parameters": [
         "Signal Type",
         "Strong Body Minimum Body % Of Candle",
@@ -43,6 +43,7 @@
         "Use Volatility Ratio Filter",
         "Use Bar Size Filter",
         "Use SuperTrend Distance Filter",
+        "Use Multiple Entries",
         "Use Range High Low",
         "Use Entry Offset"
       ],
@@ -65,6 +66,20 @@
           "Failed Breakout / Breakdown"
         ]
       }
+    },
+    "clover": {
+      "symbol": "NQ1!",
+      "timeframe": "1",
+      "updated_at": "2026-05-30T18:13:41",
+      "parameters": [
+        "BodySizeDiv",
+        "AtrDiv",
+        "VolDup",
+        "TP TICKS",
+        "SL TICKS",
+        "Contracts"
+      ],
+      "parameter_options": {}
     }
   }
 }

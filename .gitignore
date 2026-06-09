@@ -6,6 +6,7 @@ tv_chrome_profile/
 *.err.log
 optimizer_progress.json
 optimizer_stop.flag
+*_debug.html
 
 Optimization_Report*.pdf
 .streamlit/secrets.toml

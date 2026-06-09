@@ -241,7 +241,7 @@ def main():
 
             canvas = page.locator("canvas[data-qa-id='pane-top-canvas']")
 
-            canvas.wait_for()
+            canvas.wait_for(state="visible", timeout=15000)
             canvas.click(button="right")
 
             print("Right click on chart executed")
@@ -259,7 +259,7 @@ def main():
 
             # 1️⃣ קליק ימני על הגרף
             canvas = page.locator("canvas[data-qa-id='pane-top-canvas']")
-            canvas.wait_for()
+            canvas.wait_for(state="visible", timeout=15000)
 
             # קבלת המידות האמיתיות של האלמנט
             box = canvas.bounding_box()
@@ -267,38 +267,130 @@ def main():
             if not box:
                 raise Exception("Could not get canvas bounding box")
 
-            # נלחץ 10 פיקסלים מהקצה הימני
-            x_offset = box["width"] - 10
-            y_offset = box["height"] / 2  # באמצע אנכית
+            click_points = [
+                (0.72, 0.28),
+                (0.55, 0.30),
+                (0.78, 0.40),
+                (0.45, 0.35),
+            ]
+            menu_opened = False
+            last_error = None
 
-            canvas.click(
-                button="right",
-                position={"x": x_offset, "y": y_offset}
-            )
+            for x_ratio, y_ratio in click_points:
+                x = box["x"] + (box["width"] * x_ratio)
+                y = box["y"] + (box["height"] * y_ratio)
+                try:
+                    page.mouse.click(x, y, button="right")
+                    page.wait_for_timeout(700)
+                    if page.locator("[data-qa-id='menu-inner'] tr[data-role='menuitem']").count() > 0:
+                        menu_opened = True
+                        print(f"Right-clicked chart at {x_ratio:.2f}, {y_ratio:.2f}")
+                        break
+                except Exception as e:
+                    last_error = e
 
-            print("Right-clicked on right side of canvas")
-            page.wait_for_timeout(1000)
+            if not menu_opened:
+                print(f"Could not open chart context menu; continuing without clearing indicators: {last_error}")
+                return
 
             print("Context menu opened")
 
-            # 2️⃣ למצוא Remove X indicators (טקסט דינמי)
-            remove_option = page.locator("span.label-GJX1EXhk").filter(
-                has_text="indicator"
+            remove_option = page.locator("tr[data-role='menuitem']").filter(
+                has_text=re.compile(r"Remove\s+\d+\s+indicators?", re.IGNORECASE)
             )
 
             if remove_option.count() == 0:
+                remove_option = page.locator("[data-qa-id='menu-inner'] tr").filter(
+                    has_text=re.compile(r"Remove.*indicators?", re.IGNORECASE)
+                )
+
+            if remove_option.count() == 0:
                 print("No indicators remove option found")
+                page.keyboard.press("Escape")
                 return
 
-            remove_option.first.click()
+            try:
+                remove_option.first.click(force=True, timeout=5000)
+            except Exception:
+                remove_option.first.evaluate("el => el.click()")
 
             print("Clicked remove indicators")
 
             page.wait_for_timeout(1000)
+            return
+
+        def open_indicators_dialog(page):
+            selectors = [
+                "[data-name='open-indicators-dialog']:visible",
+                "button[aria-label*='Indicators']:visible",
+                "button[title*='Indicators']:visible",
+            ]
+            last_error = None
+
+            for selector in selectors:
+                button = page.locator(selector).first
+                try:
+                    if button.count() == 0:
+                        continue
+                    button.wait_for(state="visible", timeout=5000)
+                    button.click(timeout=5000)
+                    page.locator("#indicators-dialog-search-input:visible").wait_for(
+                        state="visible",
+                        timeout=10000,
+                    )
+                    print(f"Opened indicators dialog using selector: {selector}")
+                    return
+                except Exception as e:
+                    last_error = e
+
+            try:
+                button = page.get_by_role(
+                    "button",
+                    name=re.compile("Indicators", re.IGNORECASE),
+                ).first
+                button.click(force=True, timeout=5000)
+                page.locator("#indicators-dialog-search-input:visible").wait_for(
+                    state="visible",
+                    timeout=10000,
+                )
+                print("Opened indicators dialog using role fallback")
+                return
+            except Exception as e:
+                last_error = e
+
+            raise Exception(f"Could not open indicators dialog: {last_error}")
+
         clear_indicators_via_context_menu(page)
         page.wait_for_timeout(1000)
 
-        page.locator("[data-name='open-indicators-dialog']:visible").click()
+        def clear_indicators_from_legend(page):
+            for _ in range(20):
+                delete_buttons = page.locator(
+                    "div[data-qa-id='legend-source-item'] button[data-qa-id='legend-delete-action']"
+                )
+                count = delete_buttons.count()
+                if count == 0:
+                    print("No existing legend indicators to remove")
+                    return
+
+                print(f"Removing {count} existing legend indicator(s)")
+                removed_any = False
+                for index in range(count - 1, -1, -1):
+                    try:
+                        delete_buttons.nth(index).evaluate("el => el.click()")
+                        removed_any = True
+                        page.wait_for_timeout(300)
+                    except Exception as e:
+                        print(f"Could not remove legend indicator {index}: {e}")
+
+                if not removed_any:
+                    return
+                page.wait_for_timeout(700)
+
+        clear_indicators_from_legend(page)
+        page.wait_for_timeout(1000)
+
+        open_indicators_dialog(page)
 
         search_input = page.locator("#indicators-dialog-search-input:visible")
         search_input.wait_for(state="visible")
@@ -311,18 +403,17 @@ def main():
         first_script.wait_for(state="visible")
         first_script.click()
         page.locator("button[data-qa-id='close']:visible").click()
-        page.wait_for_timeout(2000)
-
-
-        page.locator(
-            f"button[data-strategy-title='{bot_name}']:visible"
-        ).click()
+        try:
+            page.locator("div[data-qa-id='legend-source-item']:visible").filter(
+                has_text=bot_name
+            ).first.wait_for(state="visible", timeout=5000)
+        except Exception:
+            page.locator("div[data-qa-id='legend-source-item']").filter(
+                has_text=bot_name
+            ).first.wait_for(state="attached", timeout=5000)
+            print("Strategy legend row is attached but not visible; continuing")
         page.wait_for_timeout(1000)
 
-
-
-        page.locator("div[class^='right-'] span[class^='contextActions-']:visible").first.click()
-        page.wait_for_timeout(2000)
         def set_timeframe(page, value: str):
 
             # פתיחת תפריט
@@ -340,12 +431,74 @@ def main():
             page.locator("button:has-text('—'):visible").first.click()
 
             # מחכה שהתפריט יופיע
-            page.locator("div[role='menuitemcheckbox']").first.wait_for()
+            page.locator("div[role='menuitemcheckbox']").first.wait_for(state="visible", timeout=5000)
 
             # לוחץ לפי aria-label
             page.locator(
                 f"[role='menuitemcheckbox'][aria-label='{range_label}']:visible"
             ).click()
+
+        def set_backtest_range(page, range_label: str):
+            open_buttons = [
+                "button:has-text('—'):visible",
+                "button:has-text('â€”'):visible",
+            ]
+            last_error = None
+
+            for selector in open_buttons:
+                try:
+                    page.locator(selector).first.click(timeout=5000)
+                    break
+                except Exception as e:
+                    last_error = e
+            else:
+                print(f"Could not open backtest range menu; leaving default range: {last_error}")
+                return
+
+            try:
+                page.locator("div[role='menuitemcheckbox']").first.wait_for(
+                    state="visible",
+                    timeout=5000,
+                )
+                page.locator(
+                    f"[role='menuitemcheckbox'][aria-label='{range_label}']:visible"
+                ).click(timeout=5000)
+                print(f"Selected backtest range: {range_label}")
+            except Exception as e:
+                print(f"Could not select backtest range '{range_label}'; leaving default range: {e}")
+                page.keyboard.press("Escape")
+
+        def set_backtest_range(page, range_label: str):
+            try:
+                page.locator("button[data-qa-id='date-range-menu']:visible").first.click(timeout=5000)
+                page.locator(
+                    "div[role='menuitemcheckbox'], [role='menuitemcheckbox'], [data-role='menuitem'], [data-is-popover-item-button='true']"
+                ).first.wait_for(state="visible", timeout=5000)
+
+                option = page.locator(
+                    f"[role='menuitemcheckbox'][aria-label='{range_label}']:visible"
+                )
+                if option.count() == 0:
+                    option = page.locator(
+                        "div[role='menuitemcheckbox'], [role='menuitemcheckbox'], [data-role='menuitem'], [data-is-popover-item-button='true']"
+                    ).filter(has_text=range_label)
+                if option.count() == 0:
+                    option = page.locator("[data-is-popover-item-button='true']").filter(
+                        has=page.locator(
+                            f"div.title-fY6nuScj",
+                            has_text=re.compile(f"^{re.escape(range_label)}$"),
+                        )
+                    )
+                if option.count() == 0:
+                    option = page.locator("[data-is-popover-item-button='true']").filter(
+                        has_text=range_label
+                    )
+
+                option.first.click(force=True, timeout=5000)
+                print(f"Selected backtest range: {range_label}")
+            except Exception as e:
+                print(f"Could not select backtest range '{range_label}'; leaving default range: {e}")
+                page.keyboard.press("Escape")
 
         set_timeframe(page, timeframe) 
 
@@ -354,10 +507,66 @@ def main():
         # set_backtest_range(page, "Last 7 days")
         # set_backtest_range(page, "Last 30 days")
         # set_backtest_range(page, "Last 90 days")
-        set_backtest_range(page, range_label)
+        if args.scan_params:
+            print("Skipping backtest range selection while scanning variables")
+        else:
+            set_backtest_range(page, range_label)
         # set_backtest_range(page, "Entire history")
         # ללחוץ על Sign in לפי טקסט
         page.wait_for_timeout(1000)
+
+        def open_strategy_report(page):
+            report_button = page.locator(
+                f"button[data-qa-id='backtesting']:has-text('{bot_name}')"
+            ).first
+            try:
+                if report_button.count() == 0:
+                    report_button = page.locator("button[data-qa-id='backtesting']").first
+                if report_button.get_attribute("data-active") == "true":
+                    print("Strategy report already open")
+                    return True
+                report_button.click(force=True, timeout=5000)
+                page.wait_for_timeout(1000)
+                print("Opened strategy report")
+                return True
+            except Exception as e:
+                print(f"Could not open strategy report: {e}")
+                return False
+
+        def enable_bar_magnifier(page):
+            if not open_strategy_report(page):
+                return
+
+            try:
+                page.locator("button[data-qa-id='tab-menu-trigger']:visible").first.click(
+                    force=True,
+                    timeout=5000,
+                )
+                page.wait_for_timeout(500)
+                print("Opened strategy report tab menu")
+            except Exception as e:
+                print(f"Could not open strategy report tab menu: {e}")
+                return
+
+            row = page.locator("div.buttonContent-gIRstbSk").filter(
+                has_text=re.compile(r"Bar magnifier", re.IGNORECASE)
+            ).first
+            try:
+                row.wait_for(state="visible", timeout=5000)
+            except Exception:
+                print("Bar magnifier row not found")
+                return
+
+            try:
+                switch = row.locator(".switchView-I9iUdHP0").first
+                switch.click(force=True, timeout=5000)
+                print("Clicked Bar magnifier switch")
+            except Exception:
+                row.click(force=True, timeout=5000)
+                print("Clicked Bar magnifier row")
+
+        if not args.scan_params:
+            enable_bar_magnifier(page)
 
         def rtl(text):
             return get_display(text)
@@ -407,14 +616,14 @@ def main():
             return list(product(*value_lists))
 
         def wait_for_strategy_settings_modal(page, timeout=30000):
-            submit_button = page.locator("button[data-qa-id='submit-button']:visible").first
-            submit_button.wait_for(state="visible", timeout=timeout)
-
             content_selectors = [
                 "div.cell-RLntasnw.first-RLntasnw:visible",
+                "span.label-Lah5SRBd:visible",
                 "input[data-qa-id='ui-lib-Input-input']:visible",
                 "button[role='combobox']:visible",
                 "input[type='checkbox'][data-qa-id*='ui-lib-checkbox-input']:visible",
+                "[role='dialog']:visible",
+                "[data-name='indicator-properties-dialog']:visible",
             ]
 
             deadline = time.monotonic() + (timeout / 1000)
@@ -436,21 +645,97 @@ def main():
                 f"Visible parameter names: {preview}"
             )
 
+        def open_strategy_inputs_tab(page):
+            input_tab_selectors = [
+                "button:has-text('Inputs'):visible",
+                "[role='tab']:has-text('Inputs'):visible",
+                "div:has-text('Inputs'):visible",
+            ]
+
+            for selector in input_tab_selectors:
+                tab = page.locator(selector).first
+                try:
+                    if tab.count() == 0:
+                        continue
+                    tab.click(force=True, timeout=3000)
+                    page.wait_for_timeout(500)
+                    print("Opened Inputs tab")
+                    return
+                except Exception:
+                    pass
+
+            print("Could not explicitly open Inputs tab; scanning currently visible settings")
+
+        def ensure_indicators_legend_expanded(page):
+            wrapper = page.locator("[data-qa-id='legend-sources-wrapper']").first
+            toggler = page.locator("button[data-qa-id='legend-toggler']").first
+
+            try:
+                wrapper.wait_for(state="attached", timeout=5000)
+            except Exception:
+                return
+
+            try:
+                wrapper_class = wrapper.get_attribute("class") or ""
+                visible_items_count = page.locator(
+                    "div[data-qa-id='legend-source-item']:visible"
+                ).count()
+                should_expand = "closed-" in wrapper_class or visible_items_count == 0
+
+                if should_expand and toggler.count() > 0:
+                    toggler.click(force=True, timeout=5000)
+                    page.wait_for_timeout(500)
+                    print("Expanded indicators legend")
+            except Exception as e:
+                print(f"Could not expand indicators legend: {e}")
+
         def open_last_strategy_settings(page):
 
+            ensure_indicators_legend_expanded(page)
 
             item = page.locator(
-                "div[data-qa-id='legend-source-item']"
+                "div[data-qa-id='legend-source-item']:visible"
             ).filter(
                 has=page.locator("div.title-l31H9iuA", has_text=bot_name)
             ).first
 
-            item.wait_for()
+            try:
+                item.wait_for(state="visible", timeout=15000)
+            except Exception:
+                item = page.locator(
+                    "div[data-qa-id='legend-source-item']:visible"
+                ).filter(has_text=bot_name).first
+                try:
+                    item.wait_for(state="visible", timeout=5000)
+                except Exception:
+                    item = page.locator(
+                        "div[data-qa-id='legend-source-item']"
+                    ).filter(has_text=bot_name).first
+                    item.wait_for(state="attached", timeout=5000)
 
             # מקבלים מיקום פיזי במסך
             box = item.bounding_box()
             if not box:
-                raise Exception("No bounding box for legend item")
+                settings_button = item.locator(
+                    "button[data-qa-id='legend-settings-action']"
+                ).first
+                try:
+                    settings_button.evaluate("el => el.click()")
+                    wait_for_strategy_settings_modal(page, timeout=7000)
+                    open_strategy_inputs_tab(page)
+                    print("Settings modal opened from attached hidden legend row")
+                    return
+                except Exception as e:
+                    try:
+                        debug_html = item.evaluate("el => el.outerHTML")
+                        Path("tradingview_hidden_legend_debug.html").write_text(
+                            debug_html,
+                            encoding="utf-8",
+                        )
+                        print("Saved hidden legend debug HTML to tradingview_hidden_legend_debug.html")
+                    except Exception:
+                        pass
+                    raise Exception(f"No visible legend item for strategy settings: {e}")
 
             # מזיזים עכבר פיזית למרכז האלמנט
             page.mouse.move(
@@ -471,36 +756,74 @@ def main():
                 "button[data-qa-id='legend-settings-action']"
             ).first
 
-            settings_button.wait_for(state="attached", timeout=10000)
+            def wait_after_settings_click(label):
+                wait_for_strategy_settings_modal(page, timeout=2000)
+                open_strategy_inputs_tab(page)
+                print(f"Settings modal opened via {label}")
+
+            click_attempts = [
+                ("settings DOM click", lambda: settings_button.evaluate("el => el.click()")),
+                ("settings force click", lambda: settings_button.click(force=True, timeout=1500)),
+                (
+                    "settings labeled button",
+                    lambda: item.locator(
+                        "button[aria-label*='Settings'], button[title*='Settings'], button:has-text('Settings')"
+                    ).first.click(force=True, timeout=1500),
+                ),
+                (
+                    "legend action menu",
+                    lambda: item.locator(
+                        "button[aria-label*='More'], button[title*='More'], span[class^='contextActions-'], div[class^='contextActions-']"
+                    ).first.click(force=True, timeout=1500),
+                ),
+            ]
+
             last_error = None
-
             for attempt in range(1, 4):
-                try:
-                    settings_button.scroll_into_view_if_needed(timeout=5000)
-                    settings_button.click(timeout=5000)
-                    print(f"Clicked settings via locator (attempt {attempt})")
-                except Exception as e:
-                    last_error = e
-                    settings_box = settings_button.bounding_box()
-                    if not settings_box:
-                        page.wait_for_timeout(500)
-                        continue
+                item.hover(timeout=5000)
+                page.wait_for_timeout(300)
 
-                    page.mouse.click(
-                        settings_box["x"] + settings_box["width"] / 2,
-                        settings_box["y"] + settings_box["height"] / 2
-                    )
-                    print(f"Clicked settings via mouse (attempt {attempt})")
+                for label, click_action in click_attempts:
+                    try:
+                        click_action()
+                        if label == "legend action menu":
+                            page.get_by_role("menuitem").filter(
+                                has_text=re.compile("Settings", re.IGNORECASE)
+                            ).first.click(timeout=3000)
+                        wait_after_settings_click(f"{label} (attempt {attempt})")
+                        return
+                    except Exception as e:
+                        last_error = e
+                        try:
+                            page.keyboard.press("Escape")
+                        except Exception:
+                            pass
 
-                try:
-                    wait_for_strategy_settings_modal(page, timeout=15000)
-                    print("Settings modal opened")
-                    return
-                except Exception as e:
-                    last_error = e
-                    page.wait_for_timeout(1000)
+                box = item.bounding_box()
+                if box:
+                    for x_offset in (28, 54, 82, 112):
+                        try:
+                            page.mouse.move(box["x"] + box["width"] - x_offset, box["y"] + box["height"] / 2)
+                            page.mouse.click(box["x"] + box["width"] - x_offset, box["y"] + box["height"] / 2)
+                            wait_after_settings_click(f"legend coordinate x-offset {x_offset} (attempt {attempt})")
+                            return
+                        except Exception as e:
+                            last_error = e
+                            try:
+                                page.keyboard.press("Escape")
+                            except Exception:
+                                pass
 
-            raise Exception(f"Could not open settings modal after 3 attempts: {last_error}")
+                page.wait_for_timeout(700)
+
+            try:
+                debug_html = item.evaluate("el => el.outerHTML")
+                Path("tradingview_legend_debug.html").write_text(debug_html, encoding="utf-8")
+                print("Saved legend debug HTML to tradingview_legend_debug.html")
+            except Exception as e:
+                print(f"Could not save legend debug HTML: {e}")
+
+            raise Exception(f"Could not open settings modal after multiple attempts: {last_error}")
 
         def get_visible_parameter_names(page):
             try:
@@ -635,6 +958,7 @@ def main():
                 message=f"Opening {bot_name} settings to scan variables",
             )
             open_last_strategy_settings(page)
+            open_strategy_inputs_tab(page)
             parameter_names = collect_strategy_parameter_names(page)
             if not parameter_names:
                 raise Exception(f"No variables found for strategy '{bot_name}'")
@@ -821,6 +1145,7 @@ def main():
             print("Settings modal closed")
 
             # 3️⃣ למצוא שוב את ה-wrapper של ה-legend
+            ensure_indicators_legend_expanded(page)
             legend_wrapper = page.locator("div.sourcesWrapper-l31H9iuA")
 
             items = legend_wrapper.locator(
@@ -842,36 +1167,62 @@ def main():
 
             # force בגלל בעיית canvas overlay
             eye_button.click(force=True)
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(150)
             eye_button.click(force=True)
 
             print("Eye toggled twice")
 
-        def wait_for_report_update(page, previous_value=None, timeout=30):
+        def get_report_field_value(page, titles, timeout=5000):
+            if isinstance(titles, str):
+                titles = [titles]
+
+            cell_selectors = [
+                ("div.containerCell-tT6DSV6p", "div.title-zDosnhC8", "div.value-h8CiKuR5"),
+                ("div.containerCell-zres18Ue", "div.title-nEWm7_ye", "div.value-DiHajR6I"),
+            ]
+
+            for title in titles:
+                for cell_selector, title_selector, value_selector in cell_selectors:
+                    cell = page.locator(cell_selector).filter(
+                        has=page.locator(title_selector, has_text=re.compile(f"^{re.escape(title)}$"))
+                    ).first
+                    try:
+                        cell.wait_for(state="visible", timeout=timeout)
+                        value = cell.locator(value_selector).first.inner_text(timeout=timeout).strip()
+                        if value:
+                            return value
+                    except Exception:
+                        pass
+
+            raise Exception(f"Could not find report field: {', '.join(titles)}")
+
+        def get_report_field_change(page, titles, timeout=150):
+            if isinstance(titles, str):
+                titles = [titles]
+
+            for title in titles:
+                cell = page.locator("div.containerCell-tT6DSV6p").filter(
+                    has=page.locator("div.title-zDosnhC8", has_text=re.compile(f"^{re.escape(title)}$"))
+                ).first
+                try:
+                    cell.wait_for(state="visible", timeout=timeout)
+                    return cell.locator("div.change-h8CiKuR5").first.inner_text(timeout=timeout).strip()
+                except Exception:
+                    pass
+
+            return ""
+
+        def wait_for_report_update(page, previous_value=None, timeout=8):
             """
             Wait for the strategy report to be shown and ready.
             Return as soon as Total P&L and drawdown values are visible and not placeholders.
             """
-            time.sleep(1)
-
-            pnl_locator = page.locator(
-                "div.containerCell-zres18Ue"
-            ).filter(
-                has=page.locator("div.title-nEWm7_ye", has_text="Total P&L")
-            ).locator("div.value-DiHajR6I")
-
-            dd_locator = page.locator(
-                "div.containerCell-zres18Ue"
-            ).filter(
-                has=page.locator("div.title-nEWm7_ye", has_text="Max equity drawdown")
-            ).locator("div.value-DiHajR6I")
-
             start_time = time.time()
 
             while True:
                 try:
-                    pnl_text = pnl_locator.inner_text().strip()
-                    dd_text = dd_locator.inner_text().strip()
+                    pnl_text = get_report_field_value(page, ["Total PnL", "Total P&L"], timeout=300)
+                    dd_text = get_report_field_value(page, ["Max drawdown", "Max equity drawdown"], timeout=300)
 
                     if (
                         pnl_text and pnl_text != "--" and
@@ -885,34 +1236,28 @@ def main():
                 if time.time() - start_time > timeout:
                     print(f"Timeout waiting for report update ({timeout}s), but proceeding with current values")
                     try:
-                        return pnl_locator.inner_text().strip()
+                        return get_report_field_value(page, ["Total PnL", "Total P&L"], timeout=300)
                     except Exception:
                         return previous_value or "0"
 
-                time.sleep(0.5)
+                time.sleep(0.15)
 
         def get_total_pnl(page):
-
-            pnl = page.locator(
-                "div.containerCell-zres18Ue"
-            ).filter(
-                has=page.locator("div.title-nEWm7_ye", has_text="Total P&L")
-            ).locator("div.value-DiHajR6I")
-
-            pnl.wait_for()
-            return pnl.inner_text().strip()
+            try:
+                return get_report_field_value(page, ["Total PnL", "Total P&L"], timeout=10000)
+            except Exception:
+                open_strategy_report(page)
+                return get_report_field_value(page, ["Total PnL", "Total P&L"], timeout=30000)
 
         def get_report_values(page):
 
             def get_value_by_title(title_text, default="0"):
                 try:
-                    cell = page.locator(
-                        "div.containerCell-zres18Ue"
-                    ).filter(
-                        has=page.locator("div.title-nEWm7_ye", has_text=title_text)
-                    )
-
-                    value_text = cell.locator("div.value-DiHajR6I").inner_text(timeout=5000).strip()
+                    aliases = {
+                        "Total P&L": ["Total PnL", "Total P&L"],
+                        "Max equity drawdown": ["Max drawdown", "Max equity drawdown"],
+                    }.get(title_text, [title_text])
+                    value_text = get_report_field_value(page, aliases, timeout=150)
                     return value_text if value_text and value_text != "--" else default
                 except Exception as e:
                     print(f"Warning: Could not find field '{title_text}', using default value '{default}'")
@@ -921,7 +1266,10 @@ def main():
             # Debug: Print available fields on first run
             if not hasattr(get_report_values, 'debug_printed'):
                 try:
-                    titles = page.locator("div.title-nEWm7_ye").all_inner_texts()
+                    titles = (
+                        page.locator("div.title-zDosnhC8").all_inner_texts()
+                        + page.locator("div.title-nEWm7_ye").all_inner_texts()
+                    )
                     print("Available report fields:", titles[:10])  # Show first 10 fields
                     get_report_values.debug_printed = True
                 except:
@@ -932,14 +1280,17 @@ def main():
 
             # Try different possible win rate field names
             wr_text = get_value_by_title("Profitable trades")
-            trades_text = get_value_by_title("Total trades")
+            trades_text = get_report_field_change(page, "Profitable trades")
 
 
             # ניקוי טקסט → מספר
             pnl = parse_tradingview_number(pnl_text)
             dd = parse_tradingview_number(dd_text)
             wr = parse_tradingview_number(wr_text)
-            trades = int(parse_tradingview_number(trades_text))
+            if "/" in trades_text:
+                trades = int(parse_tradingview_number(trades_text.split("/")[-1]))
+            else:
+                trades = int(parse_tradingview_number(trades_text or "0"))
 
             return pnl, dd, wr, trades
 
