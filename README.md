@@ -189,6 +189,8 @@ financial candlestick data (vendored in `kronos_model/`, MIT license).
 
 - Candles are downloaded from Yahoo Finance. TradingView symbols are mapped automatically
   (`NQ1!` → `NQ=F`, `EURUSD` → `EURUSD=X`, `BTCUSD` → `BTC-USD`).
+- Binance symbols (`BTCUSDT.P`, `ETHUSDT`, `BINANCE:SOLUSDT`) use real-time Binance klines
+  (perpetual futures API, falling back to spot where the futures API is geo-blocked).
 - Several sample paths are generated; the app shows the median forecast, a P10–P90 band
   and the share of paths ending above the last close (`P(up)`).
 - Model weights are downloaded from Hugging Face on first use (`NeoQuasar/Kronos-small` by default).

@@ -12,3 +12,4 @@ safetensors
 tqdm
 matplotlib
 yfinance
+requests

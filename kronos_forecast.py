@@ -67,9 +67,85 @@ def to_yahoo_symbol(symbol: str) -> str:
     return s
 
 
+# TradingView timeframe -> Binance kline interval
+BINANCE_INTERVALS = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1h",
+                     "240": "4h", "1D": "1d", "1W": "1w"}
+BINANCE_ENDPOINTS = {
+    # perpetual futures first, spot as fallback (fapi is geo-blocked in some regions)
+    "perp": ["https://fapi.binance.com/fapi/v1/klines", "https://data-api.binance.vision/api/v3/klines"],
+    "spot": ["https://data-api.binance.vision/api/v3/klines", "https://api.binance.com/api/v3/klines"],
+}
+
+
+def parse_binance_symbol(symbol: str):
+    """Return (pair, market) for Binance-style symbols such as BTCUSDT.P,
+    BINANCE:ETHUSDT or BTCUSDT; otherwise None."""
+    s = symbol.strip().upper()
+    exchange = None
+    if ":" in s:
+        exchange, s = s.split(":", 1)
+    perp = s.endswith(".P") or s.endswith("PERP")
+    pair = s.removesuffix(".P").removesuffix("PERP")
+    if exchange in (None, "BINANCE") and pair.endswith(("USDT", "USDC", "FDUSD")) and pair.isalnum():
+        return pair, ("perp" if perp else "spot")
+    return None
+
+
+def fetch_binance_candles(pair: str, market: str, timeframe: str, lookback: int) -> pd.DataFrame:
+    """Real-time klines from Binance public market data (no API key needed)."""
+    import requests
+
+    interval = BINANCE_INTERVALS[timeframe]
+    errors = []
+    for url in BINANCE_ENDPOINTS[market]:
+        try:
+            rows, end_time = [], None
+            while len(rows) < lookback + 1:
+                params = {"symbol": pair, "interval": interval,
+                          "limit": min(1000, lookback + 1 - len(rows))}
+                if end_time is not None:
+                    params["endTime"] = end_time
+                r = requests.get(url, params=params, timeout=15)
+                r.raise_for_status()
+                batch = r.json()
+                if not batch:
+                    break
+                rows = batch + rows
+                end_time = batch[0][0] - 1
+                if len(batch) < params["limit"]:
+                    break
+            source = "Binance " + ("USDⓈ-M perpetual" if "fapi" in url else "spot")
+            break
+        except Exception as exc:  # try the next endpoint
+            errors.append(f"{url}: {exc}")
+    else:
+        raise ValueError("Binance request failed: " + " | ".join(errors))
+
+    df = pd.DataFrame(rows, columns=["open_time", "open", "high", "low", "close", "volume",
+                                     "close_time", "amount", "trades", "tb_base", "tb_quote", "_"])
+    df = df.drop_duplicates("open_time")
+    now_ms = pd.Timestamp.now(tz="UTC").value // 1_000_000
+    df = df[df["close_time"] < now_ms]  # closed candles only
+    for c in ["open", "high", "low", "close", "volume", "amount"]:
+        df[c] = df[c].astype(float)
+    df["timestamps"] = pd.to_datetime(df["open_time"], unit="ms")  # UTC, naive
+    df = df[["timestamps", "open", "high", "low", "close", "volume", "amount"]].tail(lookback)
+    df = df.reset_index(drop=True)
+    df.attrs.update(ticker=f"{pair} ({source}, UTC)", freq=TIMEFRAMES[timeframe][2], continuous=True)
+    return df
+
+
 def fetch_candles(symbol: str, timeframe: str, lookback: int) -> pd.DataFrame:
     """Download the latest `lookback` closed candles as a DataFrame with a
-    `timestamps` column and open/high/low/close/volume/amount columns."""
+    `timestamps` column and open/high/low/close/volume/amount columns.
+    Binance symbols (BTCUSDT.P, ETHUSDT...) use Binance real-time data; everything
+    else uses Yahoo Finance (intraday futures data there is ~10 minutes delayed)."""
+    if timeframe not in TIMEFRAMES:
+        raise ValueError(f"Unsupported timeframe {timeframe!r}; use one of {list(TIMEFRAMES)}")
+    binance = parse_binance_symbol(symbol)
+    if binance:
+        return fetch_binance_candles(*binance, timeframe, lookback)
+
     import yfinance as yf
 
     if timeframe not in TIMEFRAMES:
@@ -120,13 +196,17 @@ def trading_slots(index: pd.DatetimeIndex, timeframe: str) -> frozenset:
 
 
 def future_timestamps(history: pd.Series, freq: str, horizon: int,
-                      slots: frozenset | None = None, timeframe: str = "") -> pd.Series:
-    """Timestamps for the next `horizon` candles. With `slots`, only trading-session
-    slots seen in the history are used; otherwise weekends are skipped."""
+                      slots: frozenset | None = None, timeframe: str = "",
+                      continuous: bool = False) -> pd.Series:
+    """Timestamps for the next `horizon` candles. 24/7 markets (`continuous`) step
+    uniformly; otherwise only trading-session slots seen in the history are used,
+    or weekends are skipped when no slots are known."""
     step = pd.Timedelta(freq)
     use_slots = bool(slots) and timeframe != "1W"
 
     def is_open(t):
+        if continuous:
+            return True
         if use_slots:
             return _slot_key(t, timeframe) in slots
         return freq == "7D" or t.weekday() < 5
@@ -224,7 +304,8 @@ def run_forecast(
     freq = history.attrs.get("freq") or TIMEFRAMES[timeframe][2]
     x_df = history[["open", "high", "low", "close", "volume", "amount"]]
     x_ts = history["timestamps"]
-    y_ts = future_timestamps(x_ts, freq, horizon, history.attrs.get("slots"), timeframe)
+    y_ts = future_timestamps(x_ts, freq, horizon, history.attrs.get("slots"), timeframe,
+                             continuous=history.attrs.get("continuous", False))
 
     preds = predictor.predict_batch(
         df_list=[x_df] * samples,
