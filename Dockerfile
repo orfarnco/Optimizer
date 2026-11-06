@@ -9,6 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 RUN pip install --upgrade pip \
+    && pip install torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install -r requirements.txt \
     && python -m playwright install --with-deps chromium
 

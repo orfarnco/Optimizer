@@ -2,3 +2,13 @@ streamlit
 playwright
 reportlab
 python-bidi
+# Kronos forecasting
+torch
+numpy
+pandas
+einops
+huggingface_hub
+safetensors
+tqdm
+matplotlib
+yfinance

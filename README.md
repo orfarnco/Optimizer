@@ -180,3 +180,24 @@ For debugging parameter detection, the script provides detailed console output s
 ## License
 
 This project is for educational and personal use. Please respect TradingView's terms of service.
+
+## Kronos Forecast
+
+The app includes a **🔮 Kronos Forecast** section that predicts the next candles with
+[Kronos](https://github.com/shiyu-coder/Kronos), an open-source foundation model for
+financial candlestick data (vendored in `kronos_model/`, MIT license).
+
+- Candles are downloaded from Yahoo Finance. TradingView symbols are mapped automatically
+  (`NQ1!` → `NQ=F`, `EURUSD` → `EURUSD=X`, `BTCUSD` → `BTC-USD`).
+- Several sample paths are generated; the app shows the median forecast, a P10–P90 band
+  and the share of paths ending above the last close (`P(up)`).
+- Model weights are downloaded from Hugging Face on first use (`NeoQuasar/Kronos-small` by default).
+
+From the command line:
+
+```bash
+python kronos_forecast.py --symbol NQ1! --timeframe 15 --horizon 32 --samples 20
+```
+
+CSV and PNG outputs are written to `kronos_forecasts/`. Forecasts are probabilistic
+model outputs, not trading advice — validate them with a backtest before use.

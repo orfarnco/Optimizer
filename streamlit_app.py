@@ -494,6 +494,65 @@ Source: list=Close,Open,High,Low
     else:
         st.info("No optimization reports found yet. Run your first optimization to generate reports!")
 
+    render_kronos_section(symbol, timeframe)
+
+
+def render_kronos_section(symbol, timeframe):
+    """Kronos foundation-model price forecast for the symbol/timeframe in the sidebar."""
+    st.markdown('<div class="section-header">🔮 Kronos Forecast</div>', unsafe_allow_html=True)
+    st.caption("Forecast of the next candles using the Kronos foundation model "
+               "(github.com/shiyu-coder/Kronos). Data from Yahoo Finance. Not financial advice.")
+
+    with st.expander("Forecast settings", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            k_symbol = st.text_input("Symbol", value=symbol, key="kronos_symbol",
+                                     help="TradingView symbol (NQ1!, EURUSD, BTCUSD...) or a Yahoo ticker")
+        with c2:
+            tf_options = ["1", "5", "15", "30", "60", "240", "1D", "1W"]
+            k_tf = st.selectbox("Timeframe", tf_options,
+                                index=tf_options.index(timeframe) if timeframe in tf_options else 2,
+                                key="kronos_tf")
+        with c3:
+            horizon = st.number_input("Candles ahead", 1, 240, 32, key="kronos_horizon")
+        with c4:
+            samples = st.number_input("Sample paths", 1, 100, 20, key="kronos_samples",
+                                      help="More paths = better uncertainty estimate, slower")
+        c5, c6, c7 = st.columns(3)
+        with c5:
+            model_size = st.selectbox("Model", ["small", "mini", "base"], key="kronos_model")
+        with c6:
+            lookback = st.number_input("Context candles", 50, 2048, 400, key="kronos_lookback",
+                                       help="Max 512 for small/base, 2048 for mini")
+        with c7:
+            temperature = st.slider("Temperature", 0.1, 2.0, 1.0, 0.1, key="kronos_temp")
+
+    if st.button("🔮 Run Kronos Forecast", key="kronos_run"):
+        try:
+            import kronos_forecast as kf
+            with st.spinner("Loading Kronos and forecasting (first run downloads the model)..."):
+                result = kf.run_forecast(k_symbol, k_tf, int(horizon), int(lookback), int(samples),
+                                         model_size, float(temperature))
+            st.session_state.kronos_result = result
+        except Exception as exc:
+            st.error(f"Kronos forecast failed: {exc}")
+
+    result = st.session_state.get("kronos_result")
+    if result is None:
+        return
+    import kronos_forecast as kf
+    s = result.summary()
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Last close", f"{s['last_close']:,.2f}", help=f"Bar {s['last_bar']}")
+    m2.metric(f"Median in {s['horizon_bars']} bars", f"{s['median_close']:,.2f}", f"{s['change_pct']:+.2f}%")
+    m3.metric("P10 – P90", f"{s['p10_close']:,.2f} – {s['p90_close']:,.2f}")
+    m4.metric("P(up)", f"{s['prob_up']:.0%}", s["direction"])
+    st.pyplot(kf.plot_forecast(result))
+    st.dataframe(result.forecast, width="stretch", hide_index=True)
+    st.download_button("⬇️ Download forecast CSV", result.forecast.to_csv(index=False).encode(),
+                       file_name=f"kronos_{s['ticker']}_{s['timeframe']}.csv", mime="text/csv",
+                       key="kronos_csv")
+
 
 def run_parameter_scan(symbol, timeframe, strategy, backtest_range):
     """Scan the selected TradingView strategy and save its input names."""

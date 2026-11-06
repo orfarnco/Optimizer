@@ -11,3 +11,4 @@ optimizer_stop.flag
 Optimization_Report*.pdf
 .streamlit/secrets.toml
 .streamlit/credentials.toml
+kronos_forecasts/
