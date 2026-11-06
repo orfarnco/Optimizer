@@ -81,7 +81,8 @@ def score_pending(log: pd.DataFrame, timeframe: str) -> pd.DataFrame:
 
 
 def scoreboard(log: pd.DataFrame) -> pd.DataFrame:
-    done = log.dropna(subset=["hit"])
+    # one prediction per symbol per base candle (re-runs on the same candle are not independent)
+    done = log.dropna(subset=["hit"]).drop_duplicates(["symbol", "last_bar"], keep="first")
     if done.empty:
         return pd.DataFrame()
 
@@ -126,7 +127,11 @@ def main():
         cycle += 1
         t0 = time.time()
         rows = forecast_all(args.symbols, args.timeframe, args.horizon, args.lookback, args.samples)
-        log = pd.concat([log, pd.DataFrame(rows)], ignore_index=True)
+        new = pd.DataFrame(rows)
+        if not log.empty:  # skip candles already forecast (e.g. after a restart)
+            seen = set(zip(log["symbol"], log["last_bar"].astype(str)))
+            new = new[[(s, str(b)) not in seen for s, b in zip(new["symbol"], new["last_bar"])]]
+        log = pd.concat([log, new], ignore_index=True)
         log = score_pending(log, args.timeframe)
         log.to_csv(log_path, index=False)
 
