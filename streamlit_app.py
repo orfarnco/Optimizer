@@ -542,11 +542,14 @@ def render_kronos_section(symbol, timeframe):
         return
     import kronos_forecast as kf
     s = result.summary()
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Last close", f"{s['last_close']:,.2f}", help=f"Bar {s['last_bar']}")
-    m2.metric(f"Median in {s['horizon_bars']} bars", f"{s['median_close']:,.2f}", f"{s['change_pct']:+.2f}%")
-    m3.metric("P10 – P90", f"{s['p10_close']:,.2f} – {s['p90_close']:,.2f}")
-    m4.metric("P(up)", f"{s['prob_up']:.0%}", s["direction"])
+    m2.metric(f"Median in {s['horizon_bars']} bars", f"{s['median_close']:,.2f}", f"{s['change_pct']:+.2f}%",
+              help=f"Target bar {s['target_time']}")
+    m3.metric("P10 (low case)", f"{s['p10_close']:,.2f}")
+    m4.metric("P90 (high case)", f"{s['p90_close']:,.2f}")
+    m5.metric("P(up)", f"{s['prob_up']:.0%}", s["direction"],
+              help="Share of sampled paths ending above the last close")
     st.pyplot(kf.plot_forecast(result))
     st.dataframe(result.forecast, width="stretch", hide_index=True)
     st.download_button("⬇️ Download forecast CSV", result.forecast.to_csv(index=False).encode(),

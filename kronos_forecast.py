@@ -269,20 +269,29 @@ def plot_forecast(result: ForecastResult, context_bars: int = 120):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    hist = result.history.tail(context_bars)
+    hist = result.history.tail(context_bars).reset_index(drop=True)
     fc = result.forecast
+    n_hist, n_fc = len(hist), len(fc)
+    # Plot by bar index (like TradingView) so closed sessions/weekends leave no gaps.
     fig, ax = plt.subplots(figsize=(11, 5))
-    ax.plot(hist["timestamps"], hist["close"], color="#1f77b4", lw=1.4, label="History (close)")
-    x = [hist["timestamps"].iloc[-1], *fc["timestamps"]]
+    ax.plot(range(n_hist), hist["close"], color="#1f77b4", lw=1.4, label="History (close)")
+    x = list(range(n_hist - 1, n_hist + n_fc))
     last = result.last_close
     ax.fill_between(x, [last, *fc["p10_close"]], [last, *fc["p90_close"]],
                     color="#ff7f0e", alpha=0.2, label="P10–P90")
     ax.plot(x, [last, *fc["median_close"]], color="#d62728", lw=1.8, label="Median forecast")
+    ax.axvline(n_hist - 1, color="gray", ls="--", lw=0.8)
+    stamps = list(hist["timestamps"]) + list(fc["timestamps"])
+    ticks = np.linspace(0, len(stamps) - 1, 8).round().astype(int)
+    fmt = "%m-%d" if result.timeframe in ("1D", "1W") else "%m-%d %H:%M"
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([pd.Timestamp(stamps[i]).strftime(fmt) for i in ticks])
     s = result.summary()
     ax.set_title(f"Kronos forecast · {result.symbol} ({result.ticker}) · TF {result.timeframe} · "
                  f"{s['direction']} {s['change_pct']:+.2f}% · P(up) {s['prob_up']:.0%}")
     ax.grid(alpha=0.3)
     ax.legend(loc="upper left")
+    ax.set_xlim(0, len(stamps) - 1)
     fig.autofmt_xdate()
     fig.tight_layout()
     return fig
